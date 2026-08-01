@@ -3,6 +3,7 @@ import sys
 from src.hand_detector import HandDetector
 from src.canvas import Canvas
 from src.gesture_detector import GestureDetector, Gesture
+from src.mode_manager import ModeManager, AppMode, DrawingState
 from src.utils.fps_calculator import FPSCalculator
 from src.utils.smoother import PointSmoother
 
@@ -21,21 +22,23 @@ def main():
         min_tracking_confidence=0.7
     )
     
-    canvas = Canvas(width=1280, height=720, color=(255, 255, 0), thickness=5)
+    canvas = Canvas(width=1280, height=720, color=(0, 0, 255), thickness=6, eraser_radius=25)
     fps_calc = FPSCalculator()
     smoother = PointSmoother(smoothing_factor=0.35)
     gesture_detector = GestureDetector()
+    mode_manager = ModeManager(initial_mode=AppMode.DRAW)
 
     print("==================================================")
-    print(" AirDesk AI - Gesture Detection Engine            ")
-    print(" Recognized Gestures:                             ")
-    print("   - INDEX_ONLY  (Pointing)                      ")
-    print("   - PINCH       (Thumb + Index tip touch)        ")
-    print("   - CLOSED_FIST (Fist)                           ")
-    print("   - OPEN_PALM   (Five fingers up)                ")
+    print(" AirDesk AI - Stateful Air Drawing (Red Pen)     ")
+    print(" Gesture Interactions:                            ")
+    print("   ☝️  INDEX_ONLY : Move Cursor / Hover           ")
+    print("   🤏  PINCH      : Draw with Red Pen             ")
+    print("   ✊  FIST       : Eraser Mode                   ")
+    print("   ✌️  PEACE SIGN : Hold 2s to Clear Canvas       ")
+    print("   👍  THUMBS UP  : Hold 2s to Save PNG           ")
     print(" Controls:                                        ")
-    print("   'c' / 'C' : Clear Canvas                       ")
-    print("   'q' / ESC : Exit Program                       ")
+    print("   'c' / 'C'      : Manual Clear Canvas           ")
+    print("   'q' / ESC      : Exit Program                   ")
     print("==================================================")
 
     window_name = "AirDesk AI - Workspace"
@@ -53,62 +56,128 @@ def main():
             landmarks = detector.find_positions(frame, draw=False)
             index_pos = detector.get_index_fingertip(frame, draw=False)
 
-            # Recognize hand gesture
             gesture = gesture_detector.detect(landmarks)
-
-            if index_pos:
-                smooth_x, smooth_y = smoother.update(index_pos[0], index_pos[1])
-                canvas.draw_line((smooth_x, smooth_y))
-            else:
-                smoother.reset()
-                canvas.reset_stroke()
-
+            mode_action = mode_manager.process(gesture, index_pos, smoother, canvas)
             composite_frame = canvas.composite(frame)
 
-            # Draw HUD overlays
             fps_calc.update()
-            fps_calc.draw(composite_frame, pos=(20, 50), color=(0, 255, 0), scale=1, thickness=2)
+            fps_calc.draw(composite_frame, pos=(20, 45), color=(0, 255, 0), scale=0.9, thickness=2)
+
+            cv2.putText(
+                composite_frame,
+                f"Mode: {mode_action['active_mode']}",
+                (20, 80),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (255, 200, 0),
+                2,
+                cv2.LINE_AA,
+            )
 
             status_text = f"Hand: {'DETECTED' if hand_detected else 'SEARCHING'}"
             status_color = (0, 255, 0) if hand_detected else (0, 165, 255)
             cv2.putText(
                 composite_frame,
                 status_text,
-                (20, 90),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                status_color,
-                2,
-                cv2.LINE_AA,
-            )
-
-            # Render detected gesture label prominently on HUD
-            gesture_color = (0, 255, 255) if gesture != Gesture.NONE else (150, 150, 150)
-            cv2.putText(
-                composite_frame,
-                f"Gesture: {gesture.value}",
-                (20, 125),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                gesture_color,
-                2,
-                cv2.LINE_AA,
-            )
-
-            cv2.putText(
-                composite_frame,
-                "Press 'C' to clear canvas",
-                (20, 155),
+                (20, 110),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.6,
-                (200, 200, 200),
+                status_color,
                 1,
                 cv2.LINE_AA,
             )
 
-            if index_pos:
-                cv2.circle(composite_frame, (smooth_x, smooth_y), 8, (0, 255, 0), cv2.FILLED)
-                cv2.circle(composite_frame, (smooth_x, smooth_y), 12, (0, 255, 255), 2)
+            gesture_color = (0, 255, 255) if gesture != Gesture.NONE else (150, 150, 150)
+            cv2.putText(
+                composite_frame,
+                f"Gesture: {gesture.value}",
+                (20, 135),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                gesture_color,
+                1,
+                cv2.LINE_AA,
+            )
+
+            state_str = mode_action["state"]
+            if state_str == DrawingState.DRAWING.value:
+                action_color = (0, 0, 255) 
+            elif state_str == DrawingState.ERASING.value:
+                action_color = (255, 255, 255)  
+            elif state_str == DrawingState.HOVER.value:
+                action_color = (0, 255, 255)  
+            elif state_str in [DrawingState.SAVING.value, DrawingState.CLEARING.value]:
+                action_color = (0, 255, 0) 
+            else:
+                action_color = (180, 180, 180)
+
+            cv2.putText(
+                composite_frame,
+                f"Action: {mode_action['action_text']}",
+                (20, 160),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.65,
+                action_color,
+                2 if state_str in [DrawingState.DRAWING.value, DrawingState.ERASING.value, DrawingState.SAVING.value] else 1,
+                cv2.LINE_AA,
+            )
+
+            # 2-Second Save Banner Overlay
+            save_countdown = mode_action.get("save_countdown")
+            if save_countdown is not None and save_countdown > 0:
+                h, w, _ = composite_frame.shape
+                banner_x = w // 2 - 200
+                banner_y = 40
+                banner_w = 400
+                banner_h = 60
+
+                cv2.rectangle(composite_frame, (banner_x, banner_y), (banner_x + banner_w, banner_y + banner_h), (30, 30, 30), cv2.FILLED)
+                cv2.rectangle(composite_frame, (banner_x, banner_y), (banner_x + banner_w, banner_y + banner_h), (0, 255, 255), 2)
+
+                progress_ratio = (2.0 - save_countdown) / 2.0
+                fill_w = int(banner_w * progress_ratio)
+                cv2.rectangle(composite_frame, (banner_x + 2, banner_y + 2), (banner_x + fill_w, banner_y + banner_h - 2), (0, 180, 0), cv2.FILLED)
+                cv2.putText(composite_frame, f"HOLD TO SAVE: {save_countdown:.1f}s", (banner_x + 60, banner_y + 38), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
+
+            # 2-Second Clear Banner Overlay
+            clear_countdown = mode_action.get("clear_countdown")
+            if clear_countdown is not None and clear_countdown > 0:
+                h, w, _ = composite_frame.shape
+                banner_x = w // 2 - 200
+                banner_y = 40
+                banner_w = 400
+                banner_h = 60
+
+                cv2.rectangle(composite_frame, (banner_x, banner_y), (banner_x + banner_w, banner_y + banner_h), (30, 30, 30), cv2.FILLED)
+                cv2.rectangle(composite_frame, (banner_x, banner_y), (banner_x + banner_w, banner_y + banner_h), (0, 100, 255), 2)
+
+                progress_ratio = (2.0 - clear_countdown) / 2.0
+                fill_w = int(banner_w * progress_ratio)
+                cv2.rectangle(composite_frame, (banner_x + 2, banner_y + 2), (banner_x + fill_w, banner_y + banner_h - 2), (0, 140, 255), cv2.FILLED)
+                cv2.putText(composite_frame, f"HOLD PEACE TO CLEAR: {clear_countdown:.1f}s", (banner_x + 30, banner_y + 38), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
+
+            cv2.putText(
+                composite_frame,
+                "[Gestures: Index=Hover | Pinch=Draw(Red) | Fist=Erase | Peace=Hold 2s to Clear | ThumbUp=Hold 2s to Save]",
+                (20, composite_frame.shape[0] - 20),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (220, 220, 220),
+                1,
+                cv2.LINE_AA,
+            )
+
+            cursor_pos = mode_action.get("cursor_pos")
+            if cursor_pos:
+                cx, cy = cursor_pos
+                if state_str == DrawingState.DRAWING.value:
+                    cv2.circle(composite_frame, (cx, cy), 8, (0, 0, 255), cv2.FILLED)
+                    cv2.circle(composite_frame, (cx, cy), 12, (0, 0, 255), 2)
+                elif state_str == DrawingState.HOVER.value:
+                    cv2.circle(composite_frame, (cx, cy), 6, (255, 255, 0), 2)
+                elif state_str == DrawingState.ERASING.value:
+                    cv2.circle(composite_frame, (cx, cy), canvas.eraser_radius, (255, 255, 255), 2)
+                    cv2.circle(composite_frame, (cx, cy), 3, (255, 255, 255), cv2.FILLED)
 
             cv2.imshow(window_name, composite_frame)
 

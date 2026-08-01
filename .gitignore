@@ -1,4 +1,5 @@
 __pycache__/
+saved_drawings/
 *.py[cod]
 *$py.class
 .env
