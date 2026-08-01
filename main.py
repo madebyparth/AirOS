@@ -2,6 +2,7 @@ import cv2
 import sys
 from src.hand_detector import HandDetector
 from src.utils.fps_calculator import FPSCalculator
+from src.utils.smoother import PointSmoother
 
 def main():
     cap = cv2.VideoCapture(0)
@@ -19,9 +20,10 @@ def main():
     )
     
     fps_calc = FPSCalculator()
+    smoother = PointSmoother(smoothing_factor=0.35)
 
     print("==================================================")
-    print(" AirDesk AI - Milestone 1: Hand Landmark Tracking ")
+    print(" AirDesk AI - Hand Landmark & Cursor Smoothing    ")
     print(" Press 'q' or 'Esc' to exit.                      ")
     print("==================================================")
 
@@ -38,7 +40,7 @@ def main():
             frame = cv2.flip(frame, 1)
             frame, hand_detected = detector.find_hands(frame, draw=True)
             landmarks = detector.find_positions(frame, draw=False)
-            index_pos = detector.get_index_fingertip(frame, draw=True)
+            index_pos = detector.get_index_fingertip(frame, draw=False)
 
             fps_calc.update()
             fps_calc.draw(frame, pos=(20, 50), color=(0, 255, 0), scale=1, thickness=2)
@@ -69,16 +71,40 @@ def main():
                 )
 
             if index_pos:
+                # Apply exponential moving average smoothing
+                smooth_x, smooth_y = smoother.update(index_pos[0], index_pos[1])
+
+                # Render raw tip position indicator (small cyan dot)
+                cv2.circle(frame, index_pos, 4, (255, 255, 0), cv2.FILLED)
+
+                # Render smoothed cursor (green filled cursor with yellow outer ring)
+                cv2.circle(frame, (smooth_x, smooth_y), 10, (0, 255, 0), cv2.FILLED)
+                cv2.circle(frame, (smooth_x, smooth_y), 15, (0, 255, 255), 2)
+
+                # HUD readout for raw and smoothed positions
                 cv2.putText(
                     frame,
-                    f"Index Tip: ({index_pos[0]}, {index_pos[1]})",
+                    f"Raw Tip: ({index_pos[0]}, {index_pos[1]})",
                     (20, 150),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.6,
-                    (0, 255, 255),
+                    (255, 255, 0),
                     1,
                     cv2.LINE_AA,
                 )
+                cv2.putText(
+                    frame,
+                    f"Smooth Cursor: ({smooth_x}, {smooth_y})",
+                    (20, 180),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (0, 255, 0),
+                    1,
+                    cv2.LINE_AA,
+                )
+            else:
+                # Reset filter history when tracking is lost to prevent jump lag upon re-detection
+                smoother.reset()
 
             cv2.imshow(window_name, frame)
             key = cv2.waitKey(1) & 0xFF
