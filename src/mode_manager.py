@@ -72,7 +72,8 @@ class DrawModeHandler(BaseModeHandler):
             self.peace_sign_start_time = None
             self.clear_confirmed = False
 
-        if gesture == Gesture.PINCH and position is not None:
+        # INDEX_ONLY -> Draw with Red Pen
+        if gesture == Gesture.INDEX_ONLY and position is not None:
             smooth_x, smooth_y = smoother.update(position[0], position[1])
             canvas.draw_line((smooth_x, smooth_y))
             self.state = DrawingState.DRAWING
@@ -80,20 +81,22 @@ class DrawModeHandler(BaseModeHandler):
             result["cursor_pos"] = (smooth_x, smooth_y)
             result["action_text"] = "DRAWING (Red Pen)"
 
-        elif gesture == Gesture.INDEX_ONLY and position is not None:
-            smooth_x, smooth_y = smoother.update(position[0], position[1])
-            canvas.reset_stroke()
-            self.state = DrawingState.HOVER
-            result["cursor_pos"] = (smooth_x, smooth_y)
-            result["action_text"] = "HOVER (Cursor Move)"
-
-        elif gesture == Gesture.CLOSED_FIST and position is not None:
+        # OPEN_PALM -> Eraser Mode
+        elif gesture == Gesture.OPEN_PALM and position is not None:
             smooth_x, smooth_y = smoother.update(position[0], position[1])
             canvas.erase_at((smooth_x, smooth_y))
             self.state = DrawingState.ERASING
             result["is_erasing"] = True
             result["cursor_pos"] = (smooth_x, smooth_y)
             result["action_text"] = "ERASING"
+
+        # CLOSED_FIST -> Hover / Move Cursor without Drawing
+        elif gesture == Gesture.CLOSED_FIST and position is not None:
+            smooth_x, smooth_y = smoother.update(position[0], position[1])
+            canvas.reset_stroke()
+            self.state = DrawingState.HOVER
+            result["cursor_pos"] = (smooth_x, smooth_y)
+            result["action_text"] = "HOVER (Fist Move)"
 
         elif gesture == Gesture.PEACE_SIGN:
             canvas.reset_stroke()

@@ -31,9 +31,9 @@ def main():
     print("==================================================")
     print(" AirDesk AI - Stateful Air Drawing (Red Pen)     ")
     print(" Gesture Interactions:                            ")
-    print("   ☝️  INDEX_ONLY : Move Cursor / Hover           ")
-    print("   🤏  PINCH      : Draw with Red Pen             ")
-    print("   ✊  FIST       : Eraser Mode                   ")
+    print("   ☝️  INDEX_ONLY : Draw with Red Pen             ")
+    print("   ✋  OPEN_PALM  : Eraser Mode                   ")
+    print("   ✊  CLOSED_FIST: Move Cursor / Hover           ")
     print("   ✌️  PEACE SIGN : Hold 2s to Clear Canvas       ")
     print("   👍  THUMBS UP  : Hold 2s to Save PNG           ")
     print(" Controls:                                        ")
@@ -158,7 +158,7 @@ def main():
 
             cv2.putText(
                 composite_frame,
-                "[Gestures: Index=Hover | Pinch=Draw(Red) | Fist=Erase | Peace=Hold 2s to Clear | ThumbUp=Hold 2s to Save]",
+                "[Gestures: Index=Draw(Red) | Palm=Erase | Fist=Hover | Peace=Hold 2s to Clear | ThumbUp=Hold 2s to Save]",
                 (20, composite_frame.shape[0] - 20),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,

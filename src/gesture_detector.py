@@ -42,9 +42,14 @@ class GestureDetector:
         pinky_up = pinky_tip[1] < pinky_pip[1]
 
         hand_scale = math.hypot(index_mcp[0] - wrist[0], index_mcp[1] - wrist[1])
-        
-        # Requires thumb tip to extend significantly above index MCP to avoid fist false positives
         thumb_up = (thumb_tip[1] < index_mcp[1] - hand_scale * 0.15) and (thumb_tip[1] < thumb_ip[1])
+
+        all_folded = not index_up and not middle_up and not ring_up and not pinky_up
+
+        if all_folded:
+            if thumb_up:
+                return Gesture.THUMBS_UP
+            return Gesture.CLOSED_FIST
 
         pinch_dist = math.hypot(thumb_tip[0] - index_tip[0], thumb_tip[1] - index_tip[1])
         dynamic_pinch_thresh = max(30.0, hand_scale * 0.35)
@@ -52,17 +57,11 @@ class GestureDetector:
         if pinch_dist < dynamic_pinch_thresh:
             return Gesture.PINCH
 
-        if thumb_up and not index_up and not middle_up and not ring_up and not pinky_up:
-            return Gesture.THUMBS_UP
-
         if index_up and middle_up and not ring_up and not pinky_up:
             return Gesture.PEACE_SIGN
 
         if index_up and middle_up and ring_up and pinky_up:
             return Gesture.OPEN_PALM
-
-        if not index_up and not middle_up and not ring_up and not pinky_up:
-            return Gesture.CLOSED_FIST
 
         if index_up and not middle_up and not ring_up and not pinky_up:
             return Gesture.INDEX_ONLY
