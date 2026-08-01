@@ -3,12 +3,6 @@ import cv2
 import numpy as np
 
 class Canvas:
-    """
-    Manages an independent drawing layer for air canvas interactions.
-    Decouples drawing state from video frames for clean compositing
-    and future extensibility (colors, erasing, saving).
-    """
-
     def __init__(
         self,
         width: int = 1280,
@@ -24,9 +18,6 @@ class Canvas:
         self.prev_point: Optional[Tuple[int, int]] = None
 
     def draw_line(self, curr_point: Tuple[int, int]) -> None:
-        """
-        Draws a continuous line segment from the previous point to the current point.
-        """
         if self.prev_point is not None:
             cv2.line(
                 self.canvas,
@@ -39,22 +30,13 @@ class Canvas:
         self.prev_point = curr_point
 
     def reset_stroke(self) -> None:
-        """
-        Resets stroke tracking when hand tracking is lost or drawing breaks.
-        """
         self.prev_point = None
 
     def clear(self) -> None:
-        """
-        Clears all drawing strokes from the canvas layer.
-        """
         self.canvas.fill(0)
         self.prev_point = None
 
     def composite(self, frame: np.ndarray) -> np.ndarray:
-        """
-        Overlays the drawing canvas layer onto the target video frame.
-        """
         h, w, _ = frame.shape
         if self.canvas.shape[0] != h or self.canvas.shape[1] != w:
             self.canvas = cv2.resize(self.canvas, (w, h))

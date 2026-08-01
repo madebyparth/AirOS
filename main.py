@@ -2,6 +2,7 @@ import cv2
 import sys
 from src.hand_detector import HandDetector
 from src.canvas import Canvas
+from src.gesture_detector import GestureDetector, Gesture
 from src.utils.fps_calculator import FPSCalculator
 from src.utils.smoother import PointSmoother
 
@@ -23,15 +24,21 @@ def main():
     canvas = Canvas(width=1280, height=720, color=(255, 255, 0), thickness=5)
     fps_calc = FPSCalculator()
     smoother = PointSmoother(smoothing_factor=0.35)
+    gesture_detector = GestureDetector()
 
     print("==================================================")
-    print(" AirDesk AI - Air Canvas (v1.0)                   ")
+    print(" AirDesk AI - Gesture Detection Engine            ")
+    print(" Recognized Gestures:                             ")
+    print("   - INDEX_ONLY  (Pointing)                      ")
+    print("   - PINCH       (Thumb + Index tip touch)        ")
+    print("   - CLOSED_FIST (Fist)                           ")
+    print("   - OPEN_PALM   (Five fingers up)                ")
     print(" Controls:                                        ")
     print("   'c' / 'C' : Clear Canvas                       ")
     print("   'q' / ESC : Exit Program                       ")
     print("==================================================")
 
-    window_name = "AirDesk AI - Air Canvas"
+    window_name = "AirDesk AI - Workspace"
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
 
     try:
@@ -46,17 +53,16 @@ def main():
             landmarks = detector.find_positions(frame, draw=False)
             index_pos = detector.get_index_fingertip(frame, draw=False)
 
+            # Recognize hand gesture
+            gesture = gesture_detector.detect(landmarks)
+
             if index_pos:
-                # Smooth the fingertip coordinates
                 smooth_x, smooth_y = smoother.update(index_pos[0], index_pos[1])
-                # Draw continuous line onto drawing layer
                 canvas.draw_line((smooth_x, smooth_y))
             else:
-                # Reset stroke & filter history when hand tracking is lost
                 smoother.reset()
                 canvas.reset_stroke()
 
-            # Composite the drawing canvas layer onto the camera feed
             composite_frame = canvas.composite(frame)
 
             # Draw HUD overlays
@@ -76,10 +82,23 @@ def main():
                 cv2.LINE_AA,
             )
 
+            # Render detected gesture label prominently on HUD
+            gesture_color = (0, 255, 255) if gesture != Gesture.NONE else (150, 150, 150)
+            cv2.putText(
+                composite_frame,
+                f"Gesture: {gesture.value}",
+                (20, 125),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                gesture_color,
+                2,
+                cv2.LINE_AA,
+            )
+
             cv2.putText(
                 composite_frame,
                 "Press 'C' to clear canvas",
-                (20, 120),
+                (20, 155),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.6,
                 (200, 200, 200),
@@ -88,19 +107,8 @@ def main():
             )
 
             if index_pos:
-                # Render cursor highlight on current smoothed position
                 cv2.circle(composite_frame, (smooth_x, smooth_y), 8, (0, 255, 0), cv2.FILLED)
                 cv2.circle(composite_frame, (smooth_x, smooth_y), 12, (0, 255, 255), 2)
-                cv2.putText(
-                    composite_frame,
-                    f"Drawing: ({smooth_x}, {smooth_y})",
-                    (20, 150),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    (0, 255, 0),
-                    1,
-                    cv2.LINE_AA,
-                )
 
             cv2.imshow(window_name, composite_frame)
 
