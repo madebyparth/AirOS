@@ -3,9 +3,11 @@ import time
 from enum import Enum
 from typing import Tuple, Optional, Dict, Any
 from src.gesture_detector import Gesture
+from src.actions.dispatcher import CommandDispatcher
 
 class AppMode(Enum):
     DRAW = "DRAW"
+    SYSTEM_CONTROL = "SYSTEM_CONTROL"
     MOUSE = "MOUSE"
     PRESENTATION = "PRESENTATION"
     MEDIA_CONTROL = "MEDIA_CONTROL"
@@ -60,6 +62,8 @@ class DrawModeHandler(BaseModeHandler):
             "saved_file": None,
             "save_countdown": None,
             "clear_countdown": None,
+            "action_countdown": None,
+            "action_target": None,
         }
 
         current_time = time.time()
@@ -72,7 +76,6 @@ class DrawModeHandler(BaseModeHandler):
             self.peace_sign_start_time = None
             self.clear_confirmed = False
 
-        # INDEX_ONLY -> Draw with Red Pen
         if gesture == Gesture.INDEX_ONLY and position is not None:
             smooth_x, smooth_y = smoother.update(position[0], position[1])
             canvas.draw_line((smooth_x, smooth_y))
@@ -81,7 +84,6 @@ class DrawModeHandler(BaseModeHandler):
             result["cursor_pos"] = (smooth_x, smooth_y)
             result["action_text"] = "DRAWING (Red Pen)"
 
-        # OPEN_PALM -> Eraser Mode
         elif gesture == Gesture.OPEN_PALM and position is not None:
             smooth_x, smooth_y = smoother.update(position[0], position[1])
             canvas.erase_at((smooth_x, smooth_y))
@@ -90,7 +92,6 @@ class DrawModeHandler(BaseModeHandler):
             result["cursor_pos"] = (smooth_x, smooth_y)
             result["action_text"] = "ERASING"
 
-        # CLOSED_FIST -> Hover / Move Cursor without Drawing
         elif gesture == Gesture.CLOSED_FIST and position is not None:
             smooth_x, smooth_y = smoother.update(position[0], position[1])
             canvas.reset_stroke()
@@ -160,11 +161,102 @@ class DrawModeHandler(BaseModeHandler):
         result["state"] = self.state.value
         return result
 
+class SystemControlModeHandler(BaseModeHandler):
+    def __init__(self, dispatcher: CommandDispatcher, action_hold_seconds: float = 2.0):
+        self.dispatcher = dispatcher
+        self.action_hold_seconds = action_hold_seconds
+        self.dispatcher.bind_gesture("SYSTEM_CONTROL", Gesture.OPEN_PALM, "open_spotify")
+        self.dispatcher.bind_gesture("SYSTEM_CONTROL", Gesture.THUMBS_UP, "take_screenshot")
+        self.dispatcher.bind_gesture("SYSTEM_CONTROL", Gesture.INDEX_ONLY, "console_log")
+
+        self.current_gesture: Optional[Gesture] = None
+        self.gesture_start_time: Optional[float] = None
+        self.action_executed: bool = False
+
+        self.last_action_msg: str = "SYSTEM CONTROL ACTIVE"
+        self.msg_until: float = 0.0
+
+    def handle_gesture(
+        self,
+        gesture: Gesture,
+        position: Optional[Tuple[int, int]],
+        smoother: Any,
+        canvas: Any,
+    ) -> Dict[str, Any]:
+        result = {
+            "active_mode": AppMode.SYSTEM_CONTROL.value,
+            "state": "IDLE",
+            "is_drawing": False,
+            "is_erasing": False,
+            "cursor_pos": None,
+            "action_text": "SYSTEM CONTROL ACTIVE",
+            "saved_file": None,
+            "save_countdown": None,
+            "clear_countdown": None,
+            "action_countdown": None,
+            "action_target": None,
+        }
+
+        current_time = time.time()
+        smoother.reset()
+        canvas.reset_stroke()
+
+        if position is not None:
+            smooth_x, smooth_y = smoother.update(position[0], position[1])
+            result["cursor_pos"] = (smooth_x, smooth_y)
+
+        if gesture in [Gesture.OPEN_PALM, Gesture.THUMBS_UP]:
+            if gesture != self.current_gesture:
+                self.current_gesture = gesture
+                self.gesture_start_time = current_time
+                self.action_executed = False
+
+            elapsed = current_time - (self.gesture_start_time or current_time)
+            remaining = max(0.0, self.action_hold_seconds - elapsed)
+
+            target_label = "SPOTIFY" if gesture == Gesture.OPEN_PALM else "SCREENSHOT"
+
+            if elapsed >= self.action_hold_seconds and not self.action_executed:
+                exec_res = self.dispatcher.dispatch("SYSTEM_CONTROL", gesture, message=f"Triggered by {gesture.value}")
+                self.action_executed = True
+                if exec_res and exec_res.get("success"):
+                    self.last_action_msg = f"EXECUTED: {target_label}"
+                else:
+                    self.last_action_msg = f"FAILED: {target_label}"
+                self.msg_until = current_time + 3.0
+
+            if not self.action_executed:
+                result["action_countdown"] = round(remaining, 1)
+                result["action_target"] = target_label
+                result["action_text"] = f"HOLD FOR {target_label}: {remaining:.1f}s"
+            else:
+                result["action_text"] = self.last_action_msg
+
+        else:
+            self.current_gesture = None
+            self.gesture_start_time = None
+            self.action_executed = False
+
+            if gesture == Gesture.INDEX_ONLY:
+                exec_res = self.dispatcher.dispatch("SYSTEM_CONTROL", gesture, message="Pointer Active")
+                if exec_res and exec_res.get("success"):
+                    self.last_action_msg = "LOGGED POINTER"
+                    self.msg_until = current_time + 1.5
+
+            if current_time < self.msg_until:
+                result["action_text"] = self.last_action_msg
+            else:
+                result["action_text"] = f"READY ({gesture.value})"
+
+        return result
+
 class ModeManager:
     def __init__(self, initial_mode: AppMode = AppMode.DRAW):
         self.active_mode = initial_mode
+        self.dispatcher = CommandDispatcher()
         self.handlers: Dict[AppMode, BaseModeHandler] = {
             AppMode.DRAW: DrawModeHandler(save_hold_seconds=2.0, clear_hold_seconds=2.0),
+            AppMode.SYSTEM_CONTROL: SystemControlModeHandler(self.dispatcher, action_hold_seconds=2.0),
         }
 
     def set_mode(self, mode: AppMode) -> None:
@@ -192,4 +284,6 @@ class ModeManager:
             "saved_file": None,
             "save_countdown": None,
             "clear_countdown": None,
+            "action_countdown": None,
+            "action_target": None,
         }
