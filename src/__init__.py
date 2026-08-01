@@ -1,3 +1,3 @@
 """
-AirDesk AI - Core package
+AirDesk AI
 """

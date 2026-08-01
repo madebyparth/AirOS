@@ -1,3 +1,3 @@
 """
-AirDesk AI - Utilities subpackage
+AirDesk AI
 """

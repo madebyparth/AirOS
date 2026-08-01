@@ -2,19 +2,12 @@ import time
 import cv2
 
 class FPSCalculator:
-    """
-    Utility class to calculate and display real-time frames per second (FPS).
-    """
-
     def __init__(self, buffer_size: int = 10):
         self.buffer_size = buffer_size
         self.prev_time = time.time()
         self.fps = 0.0
 
     def update(self) -> float:
-        """
-        Updates the FPS calculation based on elapsed time since last frame.
-        """
         current_time = time.time()
         delta_time = current_time - self.prev_time
         self.prev_time = current_time
@@ -24,9 +17,6 @@ class FPSCalculator:
         return self.fps
 
     def draw(self, img, pos=(10, 30), color=(0, 255, 0), scale=1, thickness=2):
-        """
-        Draws the current FPS value on an OpenCV image frame.
-        """
         cv2.putText(
             img,
             f"FPS: {int(self.fps)}",

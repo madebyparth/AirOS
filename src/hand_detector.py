@@ -6,30 +6,18 @@ import cv2
 import numpy as np
 import mediapipe as mp
 
-# MediaPipe Hand Landmarks Connections definition (21 points, 21 bones)
 HAND_CONNECTIONS = [
-    # Thumb
     (0, 1), (1, 2), (2, 3), (3, 4),
-    # Index finger
     (0, 5), (5, 6), (6, 7), (7, 8),
-    # Middle finger
     (5, 9), (9, 10), (10, 11), (11, 12),
-    # Ring finger
     (9, 13), (13, 14), (14, 15), (15, 16),
-    # Pinky
     (13, 17), (17, 18), (18, 19), (19, 20),
-    # Palm
     (0, 17)
 ]
 
 MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
 
 class HandDetector:
-    """
-    Modular Hand Detector supporting both MediaPipe Tasks API (HandLandmarker)
-    and legacy MediaPipe Solutions API for cross-python compatibility.
-    """
-
     def __init__(
         self,
         max_num_hands: int = 1,
@@ -42,7 +30,6 @@ class HandDetector:
         self.min_tracking_confidence = min_tracking_confidence
         self.results: Optional[Any] = None
 
-        # Check if legacy mp.solutions is available (Python <= 3.12 / older mediapipe)
         if hasattr(mp, "solutions") and hasattr(mp.solutions, "hands"):
             self.use_tasks_api = False
             self.mp_hands = mp.solutions.hands
@@ -55,11 +42,9 @@ class HandDetector:
             self.mp_draw = mp.solutions.drawing_utils
             self.mp_drawing_styles = mp.solutions.drawing_styles
         else:
-            # Use modern MediaPipe Tasks API (Python 3.13 / MediaPipe 1.0+)
             self.use_tasks_api = True
             from mediapipe.tasks.python import vision, BaseOptions
 
-            # Ensure model file is downloaded locally
             os.makedirs(model_dir, exist_ok=True)
             self.model_path = os.path.join(model_dir, "hand_landmarker.task")
             if not os.path.exists(self.model_path):
@@ -85,7 +70,6 @@ class HandDetector:
         hand_detected = False
 
         if not self.use_tasks_api:
-            # Legacy API implementation
             img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             img_rgb.flags.writeable = False
             self.results = self.hands.process(img_rgb)
@@ -103,7 +87,6 @@ class HandDetector:
                             self.mp_drawing_styles.get_default_hand_connections_style(),
                         )
         else:
-            # Tasks API implementation
             img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_rgb)
             current_timestamp = int(time.time() * 1000) - self.start_timestamp
@@ -114,16 +97,12 @@ class HandDetector:
                 if draw:
                     h, w, _ = img.shape
                     for hand_landmarks in self.results.hand_landmarks:
-                        # Draw skeletal connections
                         for start_idx, end_idx in HAND_CONNECTIONS:
                             pt1 = (int(hand_landmarks[start_idx].x * w), int(hand_landmarks[start_idx].y * h))
                             pt2 = (int(hand_landmarks[end_idx].x * w), int(hand_landmarks[end_idx].y * h))
                             cv2.line(img, pt1, pt2, (0, 255, 0), 2, cv2.LINE_AA)
-
-                        # Draw landmark nodes
                         for idx, lm in enumerate(hand_landmarks):
                             cx, cy = int(lm.x * w), int(lm.y * h)
-                            # Fingertips (4, 8, 12, 16, 20) highlighted in cyan
                             color = (255, 255, 0) if idx in [4, 8, 12, 16, 20] else (255, 0, 255)
                             radius = 6 if idx in [4, 8, 12, 16, 20] else 4
                             cv2.circle(img, (cx, cy), radius, color, cv2.FILLED)
@@ -159,9 +138,7 @@ class HandDetector:
         return landmark_list
 
     def get_handedness(self, hand_no: int = 0) -> Optional[str]:
-        """
-        Returns label indicating whether the hand is 'Left' or 'Right'.
-        """
+
         if not self.use_tasks_api:
             if self.results and self.results.multi_handedness:
                 if hand_no < len(self.results.multi_handedness):
@@ -173,9 +150,7 @@ class HandDetector:
         return None
 
     def close(self):
-        """
-        Releases MediaPipe resources cleanly.
-        """
+
         if not self.use_tasks_api and hasattr(self, "hands"):
             self.hands.close()
         elif self.use_tasks_api and hasattr(self, "landmarker"):
