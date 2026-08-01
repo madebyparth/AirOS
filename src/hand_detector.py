@@ -17,6 +17,8 @@ HAND_CONNECTIONS = [
 
 MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
 
+INDEX_FINGER_TIP = 8
+
 class HandDetector:
     def __init__(
         self,
@@ -136,6 +138,19 @@ class HandDetector:
                             cv2.circle(img, (cx, cy), 5, (255, 0, 255), cv2.FILLED)
 
         return landmark_list
+
+    def get_index_fingertip(
+        self, img, hand_no: int = 0, draw: bool = True
+    ) -> Optional[Tuple[int, int]]:
+
+        landmarks = self.find_positions(img, hand_no=hand_no, draw=False)
+        if landmarks and len(landmarks) > INDEX_FINGER_TIP:
+            _, cx, cy = landmarks[INDEX_FINGER_TIP]
+            if draw:
+                cv2.circle(img, (cx, cy), 10, (255, 0, 255), cv2.FILLED)
+                cv2.circle(img, (cx, cy), 15, (0, 255, 255), 2)
+            return (cx, cy)
+        return None
 
     def get_handedness(self, hand_no: int = 0) -> Optional[str]:
 

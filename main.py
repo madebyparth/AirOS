@@ -38,6 +38,7 @@ def main():
             frame = cv2.flip(frame, 1)
             frame, hand_detected = detector.find_hands(frame, draw=True)
             landmarks = detector.find_positions(frame, draw=False)
+            index_pos = detector.get_index_fingertip(frame, draw=True)
 
             fps_calc.update()
             fps_calc.draw(frame, pos=(20, 50), color=(0, 255, 0), scale=1, thickness=2)
@@ -63,6 +64,18 @@ def main():
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.6,
                     (255, 255, 255),
+                    1,
+                    cv2.LINE_AA,
+                )
+
+            if index_pos:
+                cv2.putText(
+                    frame,
+                    f"Index Tip: ({index_pos[0]}, {index_pos[1]})",
+                    (20, 150),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (0, 255, 255),
                     1,
                     cv2.LINE_AA,
                 )
