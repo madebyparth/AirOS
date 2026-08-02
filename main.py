@@ -61,7 +61,9 @@ def main():
             hand_detected = tracker.process(frame)
             landmarks = tracker.get_landmarks(frame) if hand_detected else []
             index_pos = tracker.get_index_fingertip(frame) if hand_detected else None
-            gesture = classifier.classify(landmarks) if hand_detected else Gesture.NONE
+
+            is_pinching = (mouse_handler.state in [MouseState.CLICK_PENDING, MouseState.DRAG])
+            gesture = classifier.classify(landmarks, is_currently_pinching_middle=is_pinching) if hand_detected else Gesture.NONE
 
             frame = tracker.draw_landmarks(frame)
 
@@ -96,7 +98,7 @@ def main():
             cv2.putText(display_frame, status_text, (20, 135), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
 
             if active_mode == AirOSMode.MOUSE:
-                guide = "[MOUSE MODE: Index=Cursor | Thumb+Middle Pinch=Left Click (<300ms) / Hold Drag (>300ms) | Victory=Menu]"
+                guide = "[MOUSE MODE: Index=Cursor | Thumb+Middle Pinch=Left Click (<280ms) / Hold Drag (>280ms) | Victory=Menu]"
             elif active_mode == AirOSMode.WHITEBOARD:
                 guide = "[WHITEBOARD APP: Index=Draw | Palm=Erase | Fist=Hover | Peace=Hold 2s Clear | ThumbUp=Hold 2s Save]"
             else:

@@ -16,7 +16,7 @@ class GestureClassifier:
     def __init__(self, pinch_threshold_px: float = 40.0):
         self.pinch_threshold_px = pinch_threshold_px
 
-    def classify(self, landmarks: List[List[int]]) -> Gesture:
+    def classify(self, landmarks: List[List[int]], is_currently_pinching_middle: bool = False) -> Gesture:
         if not landmarks or len(landmarks) < 21:
             return Gesture.NONE
 
@@ -52,16 +52,22 @@ class GestureClassifier:
                 return Gesture.THUMBS_UP
             return Gesture.CLOSED_FIST
 
-        dynamic_pinch_thresh = max(30.0, hand_scale * 0.35)
+        # Recalibrated Hysteresis Thresholds based on empirical measurements:
+        # Intentional touch ratio <= 0.32 of hand_scale (32% of hand scale)
+        # Release threshold >= 0.40 of hand_scale (40% of hand scale)
+        if is_currently_pinching_middle:
+            middle_pinch_thresh = max(40.0, hand_scale * 0.40)
+        else:
+            middle_pinch_thresh = max(32.0, hand_scale * 0.32)
 
-        # Check Thumb + Middle Pinch first (Mouse Left Click / Drag Trigger)
         middle_pinch_dist = math.hypot(thumb_tip[0] - middle_tip[0], thumb_tip[1] - middle_tip[1])
-        if middle_pinch_dist < dynamic_pinch_thresh:
+        if middle_pinch_dist < middle_pinch_thresh:
             return Gesture.PINCH_MIDDLE
 
-        # Check Thumb + Index Pinch
+        # Thumb + Index Pinch
+        dynamic_index_pinch_thresh = max(30.0, hand_scale * 0.35)
         index_pinch_dist = math.hypot(thumb_tip[0] - index_tip[0], thumb_tip[1] - index_tip[1])
-        if index_pinch_dist < dynamic_pinch_thresh:
+        if index_pinch_dist < dynamic_index_pinch_thresh:
             return Gesture.PINCH
 
         if index_up and middle_up and not ring_up and not pinky_up:
