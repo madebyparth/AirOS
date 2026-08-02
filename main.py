@@ -21,25 +21,24 @@ def main():
     print("                 AirOS Runtime v1.0               ")
     print("      AI-Powered Desktop Interaction Platform     ")
     print("==================================================")
+    print(" Mouse Interactions:                              ")
+    print("   ☝️  Index Finger        : Move Desktop Cursor   ")
+    print("   🤌  Thumb + Middle Pinch: Left Click / Drag     ")
+    print("   ✌️  Victory Gesture     : Open AirOS Menu       ")
     print(" Controls:                                        ")
     print("   'm' / 'M' : Cycle Mode (MOUSE -> WHITEBOARD -> SYSTEM)")
     print("   'c' / 'C' : Clear Canvas (Whiteboard Mode)     ")
     print("   'q' / ESC : Exit AirOS Safely                  ")
     print("==================================================")
 
-    # Initialize Core Services
     camera = CameraService(camera_id=0, width=1280, height=720)
     tracker = HandTracker(max_num_hands=1, min_detection_confidence=0.7, min_tracking_confidence=0.7)
     classifier = GestureClassifier()
     fps_calc = FPSCalculator()
 
-    # Initialize Mouse Subsystem (Core Feature)
     mouse_handler = MouseModeHandler(frame_width=1280, frame_height=720)
-
-    # Initialize Whiteboard App Module
     whiteboard_app = WhiteboardApp()
 
-    # Initialize Action Dispatcher
     dispatcher = ActionDispatcher()
     dispatcher.register_action(OpenSpotifyAction())
     dispatcher.register_action(TakeScreenshotAction())
@@ -64,10 +63,8 @@ def main():
             index_pos = tracker.get_index_fingertip(frame) if hand_detected else None
             gesture = classifier.classify(landmarks) if hand_detected else Gesture.NONE
 
-            # Draw hand skeleton overlay
             frame = tracker.draw_landmarks(frame)
 
-            # Process Active AirOS Mode
             if active_mode == AirOSMode.MOUSE:
                 mouse_res = mouse_handler.handle_frame(gesture, index_pos)
                 status_text = f"Mouse State: {mouse_res['state']} | Action: {mouse_res['action_text']}"
@@ -90,7 +87,6 @@ def main():
                 else:
                     status_text = f"System Control Ready ({gesture.value})"
 
-            # Render AirOS Top HUD
             fps_calc.update()
             fps_calc.draw(display_frame, pos=(20, 40), color=(0, 255, 0), scale=0.8, thickness=2)
 
@@ -99,15 +95,14 @@ def main():
             cv2.putText(display_frame, f"Hand: {'DETECTED' if hand_detected else 'SEARCHING'} | Gesture: {gesture.value}", (20, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 200), 1, cv2.LINE_AA)
             cv2.putText(display_frame, status_text, (20, 135), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
 
-            # Bottom legend
             if active_mode == AirOSMode.MOUSE:
-                guide = "[MOUSE MODE: Move Index=Desktop Cursor | Pinch=Left Click / Drag | Release Pinch=Drop]"
+                guide = "[MOUSE MODE: Index=Cursor | Thumb+Middle Pinch=Left Click (<300ms) / Hold Drag (>300ms) | Victory=Menu]"
             elif active_mode == AirOSMode.WHITEBOARD:
                 guide = "[WHITEBOARD APP: Index=Draw | Palm=Erase | Fist=Hover | Peace=Hold 2s Clear | ThumbUp=Hold 2s Save]"
             else:
                 guide = "[SYSTEM MODE: Open Palm=Spotify | Thumbs Up=Screenshot | Index=Log]"
 
-            cv2.putText(display_frame, guide, (20, display_frame.shape[0] - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (220, 220, 220), 1, cv2.LINE_AA)
+            cv2.putText(display_frame, guide, (20, display_frame.shape[0] - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (220, 220, 220), 1, cv2.LINE_AA)
 
             cv2.imshow(window_name, display_frame)
 

@@ -5,7 +5,8 @@ from typing import List
 class Gesture(Enum):
     NONE = "NONE"
     INDEX_ONLY = "INDEX_ONLY"
-    PINCH = "PINCH"
+    PINCH = "PINCH"                  # Thumb + Index
+    PINCH_MIDDLE = "PINCH_MIDDLE"    # Thumb + Middle
     CLOSED_FIST = "CLOSED_FIST"
     OPEN_PALM = "OPEN_PALM"
     PEACE_SIGN = "PEACE_SIGN"
@@ -51,10 +52,16 @@ class GestureClassifier:
                 return Gesture.THUMBS_UP
             return Gesture.CLOSED_FIST
 
-        pinch_dist = math.hypot(thumb_tip[0] - index_tip[0], thumb_tip[1] - index_tip[1])
         dynamic_pinch_thresh = max(30.0, hand_scale * 0.35)
 
-        if pinch_dist < dynamic_pinch_thresh:
+        # Check Thumb + Middle Pinch first (Mouse Left Click / Drag Trigger)
+        middle_pinch_dist = math.hypot(thumb_tip[0] - middle_tip[0], thumb_tip[1] - middle_tip[1])
+        if middle_pinch_dist < dynamic_pinch_thresh:
+            return Gesture.PINCH_MIDDLE
+
+        # Check Thumb + Index Pinch
+        index_pinch_dist = math.hypot(thumb_tip[0] - index_tip[0], thumb_tip[1] - index_tip[1])
+        if index_pinch_dist < dynamic_pinch_thresh:
             return Gesture.PINCH
 
         if index_up and middle_up and not ring_up and not pinky_up:
