@@ -1,6 +1,6 @@
 import sys
 from dataclasses import dataclass
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Tuple
 from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QPoint, QRect, Signal, Slot
 from PySide6.QtWidgets import (
     QWidget,
@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QGraphicsDropShadowEffect,
     QApplication,
 )
-from PySide6.QtGui import QColor, QFont, QCursor
+from PySide6.QtGui import QColor, QFont, QCursor, QGuiApplication, QPainter, QPen
 from src.core.actions import ActionDispatcher
 
 @dataclass
@@ -20,44 +20,86 @@ class LauncherItemData:
     label: str
     action_name: str
     subtitle: str
+    category: str
     color_hex: str
 
-class ItemWidget(QPushButton):
+class ItemCardWidget(QPushButton):
     """
-    Custom PySide6 widget representing a launcher item card.
-    Supports dynamic hover highlighting driven by index finger position or desktop mouse.
+    Raycast / Windows 11 Fluent styled item card widget.
+    Features smooth hover state transitions, category pills, and vibrant accent borders.
     """
     def __init__(self, data: LauncherItemData, parent=None):
         super().__init__(parent)
         self.data = data
-        self.setFixedHeight(56)
-
-        self.setText(f"  ●  {self.data.label}   —   {self.data.subtitle}")
-        self.setFont(QFont("Segoe UI", 11, QFont.Weight.Medium))
+        self.setFixedHeight(62)
         self.setCursor(Qt.PointingHandCursor)
 
         self.normal_qss = f"""
             QPushButton {{
-                background-color: rgba(35, 35, 45, 220);
-                color: #DCDCDC;
-                border: 1px solid rgba(60, 60, 75, 180);
-                border-radius: 12px;
+                background-color: rgba(30, 30, 40, 200);
+                color: #E0E0E0;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 14px;
                 text-align: left;
-                padding-left: 16px;
+                padding-left: 18px;
+                padding-right: 18px;
             }}
         """
         self.hover_qss = f"""
             QPushButton {{
-                background-color: rgba(55, 55, 75, 255);
+                background-color: rgba(45, 48, 65, 245);
                 color: #FFFFFF;
                 border: 2px solid {self.data.color_hex};
-                border-radius: 12px;
+                border-radius: 14px;
                 text-align: left;
-                padding-left: 16px;
+                padding-left: 18px;
+                padding-right: 18px;
             }}
         """
         self.setStyleSheet(self.normal_qss)
         self.is_hovered = False
+
+        self._init_content()
+
+    def _init_content(self):
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 8, 16, 8)
+        layout.setSpacing(12)
+
+        # Category Badge Dot
+        dot = QLabel(self)
+        dot.setFixedSize(10, 10)
+        dot.setStyleSheet(f"background-color: {self.data.color_hex}; border-radius: 5px; border: none;")
+        layout.addWidget(dot)
+
+        # Label & Subtitle Box
+        text_box = QVBoxLayout()
+        text_box.setSpacing(2)
+
+        self.label_lbl = QLabel(self.data.label, self)
+        self.label_lbl.setFont(QFont("Segoe UI", 11, QFont.Weight.DemiBold))
+        self.label_lbl.setStyleSheet("color: #FFFFFF; border: none; background: transparent;")
+        text_box.addWidget(self.label_lbl)
+
+        sub_lbl = QLabel(self.data.subtitle, self)
+        sub_lbl.setFont(QFont("Segoe UI", 9))
+        sub_lbl.setStyleSheet("color: #9090A5; border: none; background: transparent;")
+        text_box.addWidget(sub_lbl)
+
+        layout.addLayout(text_box)
+        layout.addStretch()
+
+        # Category Pill
+        cat_lbl = QLabel(f" [{self.data.category}] ", self)
+        cat_lbl.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+        cat_lbl.setStyleSheet(f"""
+            color: {self.data.color_hex};
+            background-color: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 6px;
+            padding: 3px 8px;
+        """)
+        layout.addWidget(cat_lbl)
 
     def set_hover_state(self, hovered: bool):
         if self.is_hovered != hovered:
@@ -66,10 +108,10 @@ class ItemWidget(QPushButton):
 
 class AirOSOverlayWindow(QWidget):
     """
-    AirOS Native Desktop Overlay Window.
-    - Frameless, translucent, always-on-top floating window.
-    - Smooth 60 FPS opacity & geometry scale animation.
-    - Data-driven action buttons.
+    AirOS Native Raycast/Spotlight Styled Overlay.
+    - Hides Windows OS cursor completely while active.
+    - Raycast glassmorphism acrylic aesthetics.
+    - Gesture target indicator driven by index finger position.
     """
     action_triggered = Signal(str)
 
@@ -77,15 +119,17 @@ class AirOSOverlayWindow(QWidget):
         super().__init__()
         self.dispatcher = action_dispatcher
         self.items_data: List[LauncherItemData] = [
-            LauncherItemData("spotify", "Spotify", "open_spotify", "Music & Podcasts", "#FFD700"),
-            LauncherItemData("chrome", "Chrome", "open_chrome", "Web Browser", "#00D7FF"),
-            LauncherItemData("vscode", "VS Code", "open_vscode", "Code Editor", "#FF7800"),
-            LauncherItemData("screenshot", "Screenshot", "take_screenshot", "Capture Desktop Screen", "#32CD32"),
-            LauncherItemData("settings", "Settings", "open_settings", "AirOS Preferences", "#C0C0C0"),
+            LauncherItemData("spotify", "Spotify", "open_spotify", "Play music & podcasts", "APP", "#00E676"),
+            LauncherItemData("chrome", "Chrome", "open_chrome", "Browse the web", "APP", "#00B0FF"),
+            LauncherItemData("vscode", "VS Code", "open_vscode", "Edit code workspace", "TOOL", "#FF9100"),
+            LauncherItemData("screenshot", "Screenshot", "take_screenshot", "Capture desktop screen", "TOOL", "#AA00FF"),
+            LauncherItemData("settings", "Settings", "open_settings", "AirOS preferences", "SYSTEM", "#B0BEC5"),
         ]
 
-        self.item_widgets: List[ItemWidget] = []
+        self.item_widgets: List[ItemCardWidget] = []
         self.is_visible_target = False
+        self.finger_screen_pos: Optional[Tuple[int, int]] = None
+        self.override_cursor_set = False
 
         self._init_window()
         self._init_ui()
@@ -98,55 +142,69 @@ class AirOSOverlayWindow(QWidget):
             | Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setFixedSize(500, 420)
+        self.setFixedSize(540, 460)
 
-        # Center on screen
         screen = QApplication.primaryScreen().geometry()
-        self.target_center = QPoint(
-            (screen.width() - self.width()) // 2,
-            (screen.height() - self.height()) // 2
-        )
-        self.move(self.target_center)
+        self.move((screen.width() - self.width()) // 2, (screen.height() - self.height()) // 2)
 
     def _init_ui(self):
-        container = QWidget(self)
-        container.setGeometry(0, 0, 500, 420)
-        container.setStyleSheet("""
+        self.container = QWidget(self)
+        self.container.setGeometry(0, 0, 540, 460)
+        self.container.setStyleSheet("""
             QWidget {
-                background-color: rgba(20, 20, 26, 240);
-                border: 2px solid rgba(0, 215, 255, 180);
+                background-color: rgba(18, 18, 24, 230);
+                border: 1px solid rgba(255, 255, 255, 0.12);
                 border-radius: 20px;
             }
         """)
 
-        # Drop shadow effect
+        # Soft drop shadow
         shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(30)
+        shadow.setBlurRadius(40)
         shadow.setColor(QColor(0, 0, 0, 180))
-        shadow.setOffset(0, 8)
-        container.setGraphicsEffect(shadow)
+        shadow.setOffset(0, 10)
+        self.container.setGraphicsEffect(shadow)
 
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(24, 20, 24, 20)
+        layout = QVBoxLayout(self.container)
+        layout.setContentsMargins(24, 22, 24, 22)
         layout.setSpacing(10)
 
-        header = QLabel("AirOS Central Launcher", container)
-        header.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
-        header.setStyleSheet("color: #FFFFFF; border: none; background: transparent;")
-        layout.addWidget(header)
+        # Header Search-Bar Pill Style
+        header_box = QHBoxLayout()
+        header_box.setSpacing(10)
 
-        sub_header = QLabel("Pinch Thumb+Middle to Select | Hold Victory 1s to Close", container)
-        sub_header.setFont(QFont("Segoe UI", 9))
-        sub_header.setStyleSheet("color: #A0A0B0; border: none; background: transparent;")
-        layout.addWidget(sub_header)
+        search_pill = QWidget(self.container)
+        search_pill.setFixedHeight(44)
+        search_pill.setStyleSheet("""
+            QWidget {
+                background-color: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(255, 255, 255, 0.10);
+                border-radius: 12px;
+            }
+        """)
+        sp_layout = QHBoxLayout(search_pill)
+        sp_layout.setContentsMargins(14, 0, 14, 0)
 
-        layout.addSpacing(6)
+        search_lbl = QLabel(" AirOS Launcher", search_pill)
+        search_lbl.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        search_lbl.setStyleSheet("color: #FFFFFF; border: none; background: transparent;")
+        sp_layout.addWidget(search_lbl)
+        sp_layout.addStretch()
+
+        hint_lbl = QLabel("Pinch to Select", search_pill)
+        hint_lbl.setFont(QFont("Segoe UI", 9, QFont.Weight.Medium))
+        hint_lbl.setStyleSheet("color: #00D7FF; border: none; background: transparent;")
+        sp_layout.addWidget(hint_lbl)
+
+        header_box.addWidget(search_pill)
+        layout.addLayout(header_box)
+        layout.addSpacing(4)
 
         for item_data in self.items_data:
-            btn = ItemWidget(item_data, container)
-            btn.clicked.connect(lambda _, name=item_data.action_name: self.on_item_clicked(name))
-            layout.addWidget(btn)
-            self.item_widgets.append(btn)
+            card = ItemCardWidget(item_data, self.container)
+            card.clicked.connect(lambda _, name=item_data.action_name: self.on_item_clicked(name))
+            layout.addWidget(card)
+            self.item_widgets.append(card)
 
         layout.addStretch()
 
@@ -158,6 +216,12 @@ class AirOSOverlayWindow(QWidget):
     def show_launcher(self):
         if not self.is_visible_target:
             self.is_visible_target = True
+
+            # Hide OS mouse cursor while launcher is active
+            if not self.override_cursor_set:
+                QGuiApplication.setOverrideCursor(Qt.CursorShape.BlankCursor)
+                self.override_cursor_set = True
+
             self.setWindowOpacity(0.0)
             self.show()
             self.raise_()
@@ -171,6 +235,12 @@ class AirOSOverlayWindow(QWidget):
     def hide_launcher(self):
         if self.is_visible_target:
             self.is_visible_target = False
+
+            # Restore OS mouse cursor on overlay close
+            if self.override_cursor_set:
+                QGuiApplication.restoreOverrideCursor()
+                self.override_cursor_set = False
+
             self.opacity_anim.stop()
             self.opacity_anim.setStartValue(self.windowOpacity())
             self.opacity_anim.setEndValue(0.0)
@@ -191,28 +261,32 @@ class AirOSOverlayWindow(QWidget):
         else:
             self.show_launcher()
 
-    def update_finger_hover(self, screen_pos: Optional[tuple[int, int]]):
+    def update_finger_hover(self, screen_pos: Optional[Tuple[int, int]]):
         """
-        Highlights launcher item card under the given screen position (X, Y).
+        Updates gesture target pointer location and highlights the single card under finger.
         """
+        self.finger_screen_pos = screen_pos
+        self.update()  # Repaint gesture target pointer indicator
+
         if not self.is_visible_target or screen_pos is None:
-            for btn in self.item_widgets:
-                btn.set_hover_state(False)
+            for card in self.item_widgets:
+                card.set_hover_state(False)
             return
 
         sx, sy = screen_pos
         local_pos = self.mapFromGlobal(QPoint(sx, sy))
 
-        for btn in self.item_widgets:
-            rect = btn.geometry()
-            is_inside = rect.contains(local_pos)
-            btn.set_hover_state(is_inside)
+        # Exclusive hit-testing: highlight only one hovered card at a time
+        hovered_card: Optional[ItemCardWidget] = None
+        for card in self.item_widgets:
+            if card.geometry().contains(local_pos):
+                hovered_card = card
+                break
 
-    def trigger_selection_at_finger(self, screen_pos: Optional[tuple[int, int]]) -> bool:
-        """
-        Triggers action of launcher item under finger position if valid,
-        and closes the launcher overlay. Returns True if an item was executed.
-        """
+        for card in self.item_widgets:
+            card.set_hover_state(card is hovered_card)
+
+    def trigger_selection_at_finger(self, screen_pos: Optional[Tuple[int, int]]) -> bool:
         if not self.is_visible_target:
             return False
 
@@ -220,12 +294,11 @@ class AirOSOverlayWindow(QWidget):
             sx, sy = screen_pos
             local_pos = self.mapFromGlobal(QPoint(sx, sy))
 
-            for btn in self.item_widgets:
-                if btn.geometry().contains(local_pos):
-                    self.on_item_clicked(btn.data.action_name)
+            for card in self.item_widgets:
+                if card.geometry().contains(local_pos):
+                    self.on_item_clicked(card.data.action_name)
                     return True
 
-        # Dismiss launcher if clicked outside
         self.hide_launcher()
         return False
 
@@ -233,3 +306,25 @@ class AirOSOverlayWindow(QWidget):
         self.dispatcher.execute_action(action_name)
         self.action_triggered.emit(action_name)
         self.hide_launcher()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        # Render custom glowing gesture pointer target dot over Qt overlay
+        if self.is_visible_target and self.finger_screen_pos is not None:
+            sx, sy = self.finger_screen_pos
+            local_pos = self.mapFromGlobal(QPoint(sx, sy))
+
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+            # Glowing Cyan Ring
+            pen = QPen(QColor(0, 215, 255, 220), 2)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawEllipse(local_pos, 10, 10)
+
+            # Core White Pointer Dot
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(255, 255, 255, 240))
+            painter.drawEllipse(local_pos, 4, 4)
+            painter.end()

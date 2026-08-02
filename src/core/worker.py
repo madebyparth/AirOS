@@ -101,4 +101,4 @@ class TrackingWorker(QThread):
 
     def stop(self):
         self.running = False
-        self.wait(timeout=1000)
+        self.wait(1000)
