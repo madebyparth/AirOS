@@ -5,8 +5,8 @@ from typing import List
 class Gesture(Enum):
     NONE = "NONE"
     INDEX_ONLY = "INDEX_ONLY"
-    PINCH = "PINCH"                  # Thumb + Index
-    PINCH_MIDDLE = "PINCH_MIDDLE"    # Thumb + Middle
+    PINCH = "PINCH"
+    PINCH_MIDDLE = "PINCH_MIDDLE"
     CLOSED_FIST = "CLOSED_FIST"
     OPEN_PALM = "OPEN_PALM"
     PEACE_SIGN = "PEACE_SIGN"
@@ -52,19 +52,12 @@ class GestureClassifier:
                 return Gesture.THUMBS_UP
             return Gesture.CLOSED_FIST
 
-        # Recalibrated Hysteresis Thresholds based on empirical measurements:
-        # Intentional touch ratio <= 0.32 of hand_scale (32% of hand scale)
-        # Release threshold >= 0.40 of hand_scale (40% of hand scale)
-        if is_currently_pinching_middle:
-            middle_pinch_thresh = max(40.0, hand_scale * 0.40)
-        else:
-            middle_pinch_thresh = max(32.0, hand_scale * 0.32)
-
+        # Hysteresis thresholds for Thumb + Middle pinch: press at <=0.32 hand_scale, release at >=0.40
+        middle_pinch_thresh = max(40.0, hand_scale * 0.40) if is_currently_pinching_middle else max(32.0, hand_scale * 0.32)
         middle_pinch_dist = math.hypot(thumb_tip[0] - middle_tip[0], thumb_tip[1] - middle_tip[1])
         if middle_pinch_dist < middle_pinch_thresh:
             return Gesture.PINCH_MIDDLE
 
-        # Thumb + Index Pinch
         dynamic_index_pinch_thresh = max(30.0, hand_scale * 0.35)
         index_pinch_dist = math.hypot(thumb_tip[0] - index_tip[0], thumb_tip[1] - index_tip[1])
         if index_pinch_dist < dynamic_index_pinch_thresh:

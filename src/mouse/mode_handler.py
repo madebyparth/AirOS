@@ -13,12 +13,6 @@ class MouseState(Enum):
     RELEASE = "RELEASE"
 
 class MouseModeHandler:
-    """
-    AirOS Mouse Mode State Machine.
-    Index fingertip anchors low-latency cursor position.
-    Thumb + Middle finger pinch (PINCH_MIDDLE) triggers stable Left Click & Drag
-    with rock-solid deadzone jitter suppression and smooth low-pass filtering.
-    """
     def __init__(
         self,
         frame_width: int = 1280,

@@ -1,3 +1,0 @@
-"""
-AirOS System Actions Package
-"""

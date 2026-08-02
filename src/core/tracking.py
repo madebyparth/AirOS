@@ -19,10 +19,6 @@ MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/han
 INDEX_FINGER_TIP = 8
 
 class HandTracker:
-    """
-    AirOS Hand Tracking Engine Service.
-    Supports both legacy MediaPipe Solutions API and modern MediaPipe Tasks API automatically.
-    """
     def __init__(
         self,
         max_num_hands: int = 1,
@@ -53,9 +49,8 @@ class HandTracker:
             os.makedirs(model_dir, exist_ok=True)
             self.model_path = os.path.join(model_dir, "hand_landmarker.task")
             if not os.path.exists(self.model_path):
-                print(f"[AirOS HandTracker] Downloading landmarker model to {self.model_path}...")
+                print(f"Downloading hand landmarker model to {self.model_path}...")
                 urllib.request.urlretrieve(MODEL_URL, self.model_path)
-                print("[AirOS HandTracker] Model downloaded successfully.")
 
             options = vision.HandLandmarkerOptions(
                 base_options=BaseOptions(model_asset_path=self.model_path),
@@ -69,23 +64,18 @@ class HandTracker:
             self.start_timestamp = int(time.time() * 1000)
 
     def process(self, frame) -> bool:
-        hand_detected = False
         if not self.use_tasks_api:
             img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             img_rgb.flags.writeable = False
             self.results = self.hands.process(img_rgb)
             img_rgb.flags.writeable = True
-            if self.results and self.results.multi_hand_landmarks:
-                hand_detected = True
+            return bool(self.results and self.results.multi_hand_landmarks)
         else:
             img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_rgb)
             current_timestamp = int(time.time() * 1000) - self.start_timestamp
             self.results = self.landmarker.detect_for_video(mp_image, current_timestamp)
-            if self.results and self.results.hand_landmarks:
-                hand_detected = True
-
-        return hand_detected
+            return bool(self.results and self.results.hand_landmarks)
 
     def draw_landmarks(self, frame):
         if not self.use_tasks_api:
@@ -135,8 +125,7 @@ class HandTracker:
     def get_index_fingertip(self, frame, hand_no: int = 0) -> Optional[Tuple[int, int]]:
         landmarks = self.get_landmarks(frame, hand_no=hand_no)
         if landmarks and len(landmarks) > INDEX_FINGER_TIP:
-            _, cx, cy = landmarks[INDEX_FINGER_TIP]
-            return (cx, cy)
+            return (landmarks[INDEX_FINGER_TIP][1], landmarks[INDEX_FINGER_TIP][2])
         return None
 
     def close(self):

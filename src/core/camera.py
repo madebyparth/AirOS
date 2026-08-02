@@ -4,16 +4,12 @@ import threading
 import cv2
 
 class CameraService:
-    """
-    Asynchronous Threaded Camera Service.
-    Runs frame capture in a background thread to eliminate the ~18ms blocking wait
-    from the main processing loop, boosting execution rate to 70+ FPS for zero-lag desktop cursor control.
-    """
     def __init__(self, camera_id: int = 0, width: int = 1280, height: int = 720):
         self.camera_id = camera_id
         self.width = width
         self.height = height
 
+        # DirectShow with CAP_PROP_BUFFERSIZE = 1 flushes driver queues for real-time capture
         if sys.platform.startswith("win"):
             self.cap = cv2.VideoCapture(self.camera_id, cv2.CAP_DSHOW)
         else:
@@ -34,10 +30,7 @@ class CameraService:
             sys.exit(1)
 
         self.ret, frame = self.cap.read()
-        if self.ret and frame is not None:
-            self.current_frame = cv2.flip(frame, 1)
-        else:
-            self.current_frame = None
+        self.current_frame = cv2.flip(frame, 1) if (self.ret and frame is not None) else None
 
         self.running = True
         self.lock = threading.Lock()

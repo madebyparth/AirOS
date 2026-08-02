@@ -4,7 +4,7 @@ from src.core.gestures import Gesture
 
 class BaseAction:
     name: str = "BaseAction"
-    description: str = "Abstract base action"
+    description: str = ""
 
     def execute(self, **kwargs) -> Dict[str, Any]:
         raise NotImplementedError

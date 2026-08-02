@@ -3,13 +3,6 @@ import math
 from typing import Tuple, Optional
 
 class ScreenMapper:
-    """
-    Rock-Solid Adaptive AirOS Screen Mapper.
-    Features:
-    1. Deadzone micro-jitter suppression (4.5px): 100% stable, zero-vibration stationary hovering.
-    2. Adaptive Low-Pass Filter: Buttery smooth motion without camera stutter.
-    3. Active ROI box & sensitivity scaling.
-    """
     def __init__(
         self,
         frame_width: int = 1280,
@@ -44,10 +37,6 @@ class ScreenMapper:
         self.prev_screen_y: Optional[float] = None
 
     def map_to_screen(self, frame_x: int, frame_y: int) -> Tuple[int, int]:
-        """
-        Maps webcam frame (X, Y) to Desktop Screen (X, Y)
-        with deadzone micro-jitter suppression and dynamic low-pass smoothing.
-        """
         min_x = self.frame_width * self.margin_x
         max_x = self.frame_width * (1.0 - self.margin_x)
         min_y = self.frame_height * self.margin_y
@@ -55,11 +44,9 @@ class ScreenMapper:
 
         norm_x = (frame_x - min_x) / (max_x - min_x) if max_x > min_x else 0.5
         norm_y = (frame_y - min_y) / (max_y - min_y) if max_y > min_y else 0.5
-
         norm_x = max(0.0, min(1.0, norm_x))
         norm_y = max(0.0, min(1.0, norm_y))
 
-        # Center-offset sensitivity scaling
         center_x, center_y = 0.5, 0.5
         norm_x = center_x + (norm_x - center_x) * self.sensitivity
         norm_y = center_y + (norm_y - center_y) * self.sensitivity
@@ -77,11 +64,10 @@ class ScreenMapper:
             dy = target_screen_y - self.prev_screen_y
             dist = math.hypot(dx, dy)
 
-            # Micro-jitter deadzone suppression
+            # Ignore micro-jitter below deadzone threshold
             if dist < self.deadzone_px:
                 return (int(round(self.prev_screen_x)), int(round(self.prev_screen_y)))
 
-            # Smooth velocity-dependent alpha curve
             ratio = min(1.0, (dist / self.cutoff_speed) ** 1.5)
             alpha = self.min_alpha + (self.max_alpha - self.min_alpha) * ratio
 

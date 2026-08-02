@@ -1,3 +1,0 @@
-"""
-AirOS Whiteboard Application Package
-"""
