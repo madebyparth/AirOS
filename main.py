@@ -1,223 +1,144 @@
 import cv2
 import sys
-from src.hand_detector import HandDetector
-from src.canvas import Canvas
-from src.gesture_detector import GestureDetector, Gesture
-from src.mode_manager import ModeManager, AppMode, DrawingState
+from src.core.camera import CameraService
+from src.core.tracking import HandTracker
+from src.core.gestures import GestureClassifier, Gesture
+from src.core.actions import ActionDispatcher
+from src.mouse.mode_handler import MouseModeHandler, MouseState
+from src.apps.whiteboard.app import WhiteboardApp
+from src.system_actions.spotify import OpenSpotifyAction
+from src.system_actions.screenshot import TakeScreenshotAction
+from src.system_actions.console_log import ConsoleLogAction
 from src.utils.fps_calculator import FPSCalculator
-from src.utils.smoother import PointSmoother
+
+class AirOSMode:
+    MOUSE = "MOUSE"
+    WHITEBOARD = "WHITEBOARD"
+    SYSTEM = "SYSTEM"
 
 def main():
-    cap = cv2.VideoCapture(0)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-
-    if not cap.isOpened():
-        print("Error: Could not access the webcam.")
-        sys.exit(1)
-
-    detector = HandDetector(
-        max_num_hands=1,
-        min_detection_confidence=0.7,
-        min_tracking_confidence=0.7
-    )
-    
-    canvas = Canvas(width=1280, height=720, color=(0, 0, 255), thickness=6, eraser_radius=25)
-    fps_calc = FPSCalculator()
-    smoother = PointSmoother(smoothing_factor=0.35)
-    gesture_detector = GestureDetector()
-    mode_manager = ModeManager(initial_mode=AppMode.DRAW)
-
     print("==================================================")
-    print(" AirDesk AI - Action Framework & Mode Dispatcher ")
-    print(" Active Mode: DRAW                                ")
+    print("                 AirOS Runtime v1.0               ")
+    print("      AI-Powered Desktop Interaction Platform     ")
+    print("==================================================")
     print(" Controls:                                        ")
-    print("   'm' / 'M'      : Switch Mode (DRAW <-> SYSTEM) ")
-    print("   'c' / 'C'      : Clear Canvas                   ")
-    print("   'q' / ESC      : Exit Program                   ")
+    print("   'm' / 'M' : Cycle Mode (MOUSE -> WHITEBOARD -> SYSTEM)")
+    print("   'c' / 'C' : Clear Canvas (Whiteboard Mode)     ")
+    print("   'q' / ESC : Exit AirOS Safely                  ")
     print("==================================================")
 
-    window_name = "AirDesk AI - Workspace"
+    # Initialize Core Services
+    camera = CameraService(camera_id=0, width=1280, height=720)
+    tracker = HandTracker(max_num_hands=1, min_detection_confidence=0.7, min_tracking_confidence=0.7)
+    classifier = GestureClassifier()
+    fps_calc = FPSCalculator()
+
+    # Initialize Mouse Subsystem (Core Feature)
+    mouse_handler = MouseModeHandler(frame_width=1280, frame_height=720)
+
+    # Initialize Whiteboard App Module
+    whiteboard_app = WhiteboardApp()
+
+    # Initialize Action Dispatcher
+    dispatcher = ActionDispatcher()
+    dispatcher.register_action(OpenSpotifyAction())
+    dispatcher.register_action(TakeScreenshotAction())
+    dispatcher.register_action(ConsoleLogAction())
+    dispatcher.bind_gesture("SYSTEM", Gesture.OPEN_PALM, "open_spotify")
+    dispatcher.bind_gesture("SYSTEM", Gesture.THUMBS_UP, "take_screenshot")
+    dispatcher.bind_gesture("SYSTEM", Gesture.INDEX_ONLY, "console_log")
+
+    active_mode = AirOSMode.MOUSE
+
+    window_name = "AirOS - Desktop Workspace"
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
 
     try:
         while True:
-            success, frame = cap.read()
+            success, frame = camera.read_frame()
             if not success:
-                print("Warning: Empty frame received from webcam. Retrying...")
                 continue
 
-            frame = cv2.flip(frame, 1)
-            frame, hand_detected = detector.find_hands(frame, draw=True)
-            landmarks = detector.find_positions(frame, draw=False)
-            index_pos = detector.get_index_fingertip(frame, draw=False)
+            hand_detected = tracker.process(frame)
+            landmarks = tracker.get_landmarks(frame) if hand_detected else []
+            index_pos = tracker.get_index_fingertip(frame) if hand_detected else None
+            gesture = classifier.classify(landmarks) if hand_detected else Gesture.NONE
 
-            gesture = gesture_detector.detect(landmarks)
-            mode_action = mode_manager.process(gesture, index_pos, smoother, canvas)
-            composite_frame = canvas.composite(frame)
+            # Draw hand skeleton overlay
+            frame = tracker.draw_landmarks(frame)
 
+            # Process Active AirOS Mode
+            if active_mode == AirOSMode.MOUSE:
+                mouse_res = mouse_handler.handle_frame(gesture, index_pos)
+                status_text = f"Mouse State: {mouse_res['state']} | Action: {mouse_res['action_text']}"
+                if mouse_res["screen_pos"]:
+                    sx, sy = mouse_res["screen_pos"]
+                    status_text += f" | Cursor: ({sx}, {sy})"
+                display_frame = frame
+
+            elif active_mode == AirOSMode.WHITEBOARD:
+                wb_res = whiteboard_app.process_frame(gesture, index_pos, frame.shape)
+                display_frame = whiteboard_app.composite_overlay(frame)
+                status_text = f"Whiteboard Action: {wb_res['action_text']}"
+
+            elif active_mode == AirOSMode.SYSTEM:
+                mouse_handler.reset()
+                exec_res = dispatcher.dispatch("SYSTEM", gesture, message="Pointer Active")
+                display_frame = frame
+                if exec_res:
+                    status_text = f"Action Executed: {exec_res.get('message', exec_res.get('action'))}"
+                else:
+                    status_text = f"System Control Ready ({gesture.value})"
+
+            # Render AirOS Top HUD
             fps_calc.update()
-            fps_calc.draw(composite_frame, pos=(20, 45), color=(0, 255, 0), scale=0.9, thickness=2)
+            fps_calc.draw(display_frame, pos=(20, 40), color=(0, 255, 0), scale=0.8, thickness=2)
 
-            mode_color = (255, 200, 0) if mode_action['active_mode'] == AppMode.DRAW.value else (255, 100, 255)
-            cv2.putText(
-                composite_frame,
-                f"Mode: {mode_action['active_mode']}  (Press 'M' to switch)",
-                (20, 80),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.65,
-                mode_color,
-                2,
-                cv2.LINE_AA,
-            )
+            mode_color = (255, 200, 0) if active_mode == AirOSMode.MOUSE else (0, 255, 255) if active_mode == AirOSMode.WHITEBOARD else (255, 100, 255)
+            cv2.putText(display_frame, f"AirOS Mode: {active_mode}  (Press 'M' to switch)", (20, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.65, mode_color, 2, cv2.LINE_AA)
+            cv2.putText(display_frame, f"Hand: {'DETECTED' if hand_detected else 'SEARCHING'} | Gesture: {gesture.value}", (20, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 200), 1, cv2.LINE_AA)
+            cv2.putText(display_frame, status_text, (20, 135), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
 
-            status_text = f"Hand: {'DETECTED' if hand_detected else 'SEARCHING'}"
-            status_color = (0, 255, 0) if hand_detected else (0, 165, 255)
-            cv2.putText(
-                composite_frame,
-                status_text,
-                (20, 110),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                status_color,
-                1,
-                cv2.LINE_AA,
-            )
-
-            gesture_color = (0, 255, 255) if gesture != Gesture.NONE else (150, 150, 150)
-            cv2.putText(
-                composite_frame,
-                f"Gesture: {gesture.value}",
-                (20, 135),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                gesture_color,
-                1,
-                cv2.LINE_AA,
-            )
-
-            state_str = mode_action["state"]
-            if state_str == DrawingState.DRAWING.value:
-                action_color = (0, 0, 255) 
-            elif state_str == DrawingState.ERASING.value:
-                action_color = (255, 255, 255)  
-            elif state_str == DrawingState.HOVER.value:
-                action_color = (0, 255, 255)  
-            elif state_str in [DrawingState.SAVING.value, DrawingState.CLEARING.value]:
-                action_color = (0, 255, 0) 
+            # Bottom legend
+            if active_mode == AirOSMode.MOUSE:
+                guide = "[MOUSE MODE: Move Index=Desktop Cursor | Pinch=Left Click / Drag | Release Pinch=Drop]"
+            elif active_mode == AirOSMode.WHITEBOARD:
+                guide = "[WHITEBOARD APP: Index=Draw | Palm=Erase | Fist=Hover | Peace=Hold 2s Clear | ThumbUp=Hold 2s Save]"
             else:
-                action_color = (180, 180, 180)
+                guide = "[SYSTEM MODE: Open Palm=Spotify | Thumbs Up=Screenshot | Index=Log]"
 
-            cv2.putText(
-                composite_frame,
-                f"Action: {mode_action['action_text']}",
-                (20, 160),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.65,
-                action_color,
-                2 if state_str in [DrawingState.DRAWING.value, DrawingState.ERASING.value, DrawingState.SAVING.value] else 1,
-                cv2.LINE_AA,
-            )
+            cv2.putText(display_frame, guide, (20, display_frame.shape[0] - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (220, 220, 220), 1, cv2.LINE_AA)
 
-            # 2-Second Save Banner Overlay
-            save_countdown = mode_action.get("save_countdown")
-            if save_countdown is not None and save_countdown > 0:
-                h, w, _ = composite_frame.shape
-                banner_x = w // 2 - 200
-                banner_y = 40
-                banner_w = 400
-                banner_h = 60
-
-                cv2.rectangle(composite_frame, (banner_x, banner_y), (banner_x + banner_w, banner_y + banner_h), (30, 30, 30), cv2.FILLED)
-                cv2.rectangle(composite_frame, (banner_x, banner_y), (banner_x + banner_w, banner_y + banner_h), (0, 255, 255), 2)
-                progress_ratio = (2.0 - save_countdown) / 2.0
-                fill_w = int(banner_w * progress_ratio)
-                cv2.rectangle(composite_frame, (banner_x + 2, banner_y + 2), (banner_x + fill_w, banner_y + banner_h - 2), (0, 180, 0), cv2.FILLED)
-                cv2.putText(composite_frame, f"HOLD TO SAVE: {save_countdown:.1f}s", (banner_x + 60, banner_y + 38), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
-
-            # 2-Second Clear Banner Overlay
-            clear_countdown = mode_action.get("clear_countdown")
-            if clear_countdown is not None and clear_countdown > 0:
-                h, w, _ = composite_frame.shape
-                banner_x = w // 2 - 200
-                banner_y = 40
-                banner_w = 400
-                banner_h = 60
-
-                cv2.rectangle(composite_frame, (banner_x, banner_y), (banner_x + banner_w, banner_y + banner_h), (30, 30, 30), cv2.FILLED)
-                cv2.rectangle(composite_frame, (banner_x, banner_y), (banner_x + banner_w, banner_y + banner_h), (0, 100, 255), 2)
-                progress_ratio = (2.0 - clear_countdown) / 2.0
-                fill_w = int(banner_w * progress_ratio)
-                cv2.rectangle(composite_frame, (banner_x + 2, banner_y + 2), (banner_x + fill_w, banner_y + banner_h - 2), (0, 140, 255), cv2.FILLED)
-                cv2.putText(composite_frame, f"HOLD PEACE TO CLEAR: {clear_countdown:.1f}s", (banner_x + 30, banner_y + 38), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
-
-            # 2-Second System Action Banner Overlay (Spotify / Screenshot)
-            action_countdown = mode_action.get("action_countdown")
-            action_target = mode_action.get("action_target")
-            if action_countdown is not None and action_countdown > 0:
-                h, w, _ = composite_frame.shape
-                banner_x = w // 2 - 220
-                banner_y = 40
-                banner_w = 440
-                banner_h = 60
-
-                cv2.rectangle(composite_frame, (banner_x, banner_y), (banner_x + banner_w, banner_y + banner_h), (30, 30, 30), cv2.FILLED)
-                cv2.rectangle(composite_frame, (banner_x, banner_y), (banner_x + banner_w, banner_y + banner_h), (255, 100, 255), 2)
-                progress_ratio = (2.0 - action_countdown) / 2.0
-                fill_w = int(banner_w * progress_ratio)
-                cv2.rectangle(composite_frame, (banner_x + 2, banner_y + 2), (banner_x + fill_w, banner_y + banner_h - 2), (200, 0, 200), cv2.FILLED)
-                cv2.putText(composite_frame, f"HOLD FOR {action_target}: {action_countdown:.1f}s", (banner_x + 20, banner_y + 38), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
-
-            if mode_action['active_mode'] == AppMode.DRAW.value:
-                guide_msg = "[DRAW MODE: Index=Draw(Red) | Palm=Erase | Fist=Hover | Peace=Hold 2s Clear | ThumbUp=Hold 2s Save]"
-            else:
-                guide_msg = "[SYSTEM MODE: Hold Palm 2s=Spotify | Hold ThumbUp 2s=Screenshot | Index=Console Log]"
-
-            cv2.putText(
-                composite_frame,
-                guide_msg,
-                (20, composite_frame.shape[0] - 20),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.48,
-                (220, 220, 220),
-                1,
-                cv2.LINE_AA,
-            )
-
-            cursor_pos = mode_action.get("cursor_pos")
-            if cursor_pos:
-                cx, cy = cursor_pos
-                if state_str == DrawingState.DRAWING.value:
-                    cv2.circle(composite_frame, (cx, cy), 8, (0, 0, 255), cv2.FILLED)
-                    cv2.circle(composite_frame, (cx, cy), 12, (0, 0, 255), 2)
-                elif state_str == DrawingState.HOVER.value or mode_action['active_mode'] == AppMode.SYSTEM_CONTROL.value:
-                    cv2.circle(composite_frame, (cx, cy), 6, (255, 255, 0), 2)
-                elif state_str == DrawingState.ERASING.value:
-                    cv2.circle(composite_frame, (cx, cy), canvas.eraser_radius, (255, 255, 255), 2)
-                    cv2.circle(composite_frame, (cx, cy), 3, (255, 255, 255), cv2.FILLED)
-
-            cv2.imshow(window_name, composite_frame)
+            cv2.imshow(window_name, display_frame)
 
             key = cv2.waitKey(1) & 0xFF
             if key == ord('q') or key == 27:
-                print("Exiting AirDesk AI...")
+                print("Shutting down AirOS...")
                 break
-            elif key == ord('c') or key == ord('C'):
-                canvas.clear()
-                print("Canvas cleared.")
             elif key == ord('m') or key == ord('M'):
-                new_mode = AppMode.SYSTEM_CONTROL if mode_manager.active_mode == AppMode.DRAW else AppMode.DRAW
-                mode_manager.set_mode(new_mode)
-                print(f"[MODE SWITCH] Active Mode changed to: {new_mode.value}")
+                if active_mode == AirOSMode.MOUSE:
+                    active_mode = AirOSMode.WHITEBOARD
+                elif active_mode == AirOSMode.WHITEBOARD:
+                    active_mode = AirOSMode.SYSTEM
+                else:
+                    active_mode = AirOSMode.MOUSE
+                mouse_handler.reset()
+                whiteboard_app.reset()
+                print(f"[AirOS] Switched Active Mode to: {active_mode}")
+            elif key == ord('c') or key == ord('C'):
+                if active_mode == AirOSMode.WHITEBOARD:
+                    whiteboard_app.clear()
+                    print("[AirOS Whiteboard] Canvas cleared.")
 
             if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
                 break
 
     finally:
-        cap.release()
-        detector.close()
+        mouse_handler.reset()
+        tracker.close()
+        camera.release()
         cv2.destroyAllWindows()
-        print("Webcam & MediaPipe resources released successfully.")
+        print("AirOS runtime safely stopped.")
 
 if __name__ == "__main__":
     main()
