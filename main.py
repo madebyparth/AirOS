@@ -1,12 +1,11 @@
-import cv2
 import sys
-from src.core.camera import CameraService
-from src.core.tracking import HandTracker
-from src.core.gestures import GestureClassifier, Gesture
+import argparse
+import cv2
+import numpy as np
+from PySide6.QtCore import Qt, Slot
+from PySide6.QtWidgets import QApplication
+
 from src.core.actions import ActionDispatcher
-from src.mouse.mode_handler import MouseModeHandler, MouseState
-from src.apps.whiteboard import WhiteboardApp
-from src.launcher import AirOSLauncher
 from src.system_actions import (
     OpenSpotifyAction,
     OpenChromeAction,
@@ -15,24 +14,26 @@ from src.system_actions import (
     OpenSettingsAction,
     ConsoleLogAction,
 )
-from src.utils.fps_calculator import FPSCalculator
+from src.ui.overlay_launcher import AirOSOverlayWindow
+from src.ui.tray_icon import AirOSTrayIcon
+from src.core.worker import TrackingWorker
 
-class AirOSMode:
-    MOUSE = "MOUSE"
-    WHITEBOARD = "WHITEBOARD"
-    SYSTEM = "SYSTEM"
+def parse_args():
+    parser = argparse.ArgumentParser(description="AirOS Background Layer & Desktop Launcher")
+    parser.add_argument("--debug", action="store_true", help="Open OpenCV camera preview debug window on startup")
+    return parser.parse_args()
 
 def main():
-    print("AirOS Workspace Runtime")
-    print("Controls: [Hold Victory 1s] Open/Close Launcher | [M] Cycle Mode | [C] Clear Canvas | [Q/ESC] Exit")
+    args = parse_args()
 
-    camera = CameraService(camera_id=0, width=1280, height=720)
-    tracker = HandTracker(max_num_hands=1, min_detection_confidence=0.7, min_tracking_confidence=0.7)
-    classifier = GestureClassifier()
-    fps_calc = FPSCalculator()
+    app = QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)
 
-    mouse_handler = MouseModeHandler(frame_width=1280, frame_height=720)
-    whiteboard_app = WhiteboardApp()
+    print("==================================================")
+    print("             AirOS Desktop Runtime v1.0           ")
+    print("   Running silently in the Windows System Tray.   ")
+    print("   Hold Victory (PEACE) 1.0s to toggle Launcher.  ")
+    print("==================================================")
 
     dispatcher = ActionDispatcher()
     dispatcher.register_action(OpenSpotifyAction())
@@ -42,120 +43,62 @@ def main():
     dispatcher.register_action(OpenSettingsAction())
     dispatcher.register_action(ConsoleLogAction())
 
-    dispatcher.bind_gesture("SYSTEM", Gesture.OPEN_PALM, "open_spotify")
-    dispatcher.bind_gesture("SYSTEM", Gesture.THUMBS_UP, "take_screenshot")
-    dispatcher.bind_gesture("SYSTEM", Gesture.INDEX_ONLY, "console_log")
+    overlay_window = AirOSOverlayWindow(dispatcher)
+    tray_icon = AirOSTrayIcon()
 
-    launcher = AirOSLauncher(dispatcher, hold_threshold_sec=1.0)
+    worker = TrackingWorker(dispatcher, hold_threshold_sec=1.0)
+    worker.show_debug_window = args.debug
 
-    active_mode = AirOSMode.MOUSE
+    # Wire Qt Signals and Slots
+    worker.victory_toggle_triggered.connect(overlay_window.toggle_launcher)
+    worker.cursor_position_updated.connect(overlay_window.update_finger_hover)
 
-    window_name = "AirOS - Desktop Workspace"
-    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    @Slot(object)
+    def on_pinch_click(screen_pos):
+        if overlay_window.is_visible_target:
+            overlay_window.trigger_selection_at_finger(screen_pos)
 
-    try:
-        while True:
-            success, frame = camera.read_frame()
-            if not success:
-                continue
+    worker.pinch_click_triggered.connect(on_pinch_click)
 
-            hand_detected = tracker.process(frame)
-            landmarks = tracker.get_landmarks(frame) if hand_detected else []
-            index_pos = tracker.get_index_fingertip(frame) if hand_detected else None
+    debug_window_visible = [args.debug]
 
-            is_pinching = (mouse_handler.state in [MouseState.CLICK_PENDING, MouseState.DRAG])
-            gesture = classifier.classify(landmarks, is_currently_pinching_middle=is_pinching) if hand_detected else Gesture.NONE
-
-            frame = tracker.draw_landmarks(frame)
-
-            # Process AirOS Central Launcher (Victory 1.0s Hold toggle)
-            launcher_res = launcher.process(gesture, index_pos, frame.shape)
-
-            if launcher_res["is_open"]:
-                # Hide desktop OS cursor while launcher overlay is open; render custom hover UI indicator
-                mouse_handler.reset()
-                status_text = "AirOS Launcher Active | Pinch Thumb+Middle to Select"
-                display_frame = launcher.render_overlay(frame, index_pos)
-
-            else:
-                if active_mode == AirOSMode.MOUSE:
-                    mouse_res = mouse_handler.handle_frame(gesture, index_pos)
-                    status_text = f"Mouse State: {mouse_res['state']} | Action: {mouse_res['action_text']}"
-                    if mouse_res["screen_pos"]:
-                        sx, sy = mouse_res["screen_pos"]
-                        status_text += f" | Cursor: ({sx}, {sy})"
-                    display_frame = frame
-
-                elif active_mode == AirOSMode.WHITEBOARD:
-                    wb_res = whiteboard_app.process_frame(gesture, index_pos, frame.shape)
-                    display_frame = whiteboard_app.composite_overlay(frame)
-                    status_text = f"Whiteboard Action: {wb_res['action_text']}"
-
-                elif active_mode == AirOSMode.SYSTEM:
-                    mouse_handler.reset()
-                    exec_res = dispatcher.dispatch("SYSTEM", gesture, message="Pointer Active")
-                    display_frame = frame
-                    if exec_res:
-                        status_text = f"Action Executed: {exec_res.get('message', exec_res.get('action'))}"
-                    else:
-                        status_text = f"System Control Ready ({gesture.value})"
-
-                display_frame = launcher.render_overlay(display_frame, index_pos)
-
-            if launcher_res["hold_countdown"] is not None:
-                status_text = f"HOLD VICTORY (PEACE) TO TOGGLE LAUNCHER: {launcher_res['hold_countdown']:.1f}s"
-
-            if launcher_res["status_text"]:
-                status_text = launcher_res["status_text"]
-
-            fps_calc.update()
-            fps_calc.draw(display_frame, pos=(20, 40), color=(0, 255, 0), scale=0.8, thickness=2)
-
-            mode_color = (255, 200, 0) if active_mode == AirOSMode.MOUSE else (0, 255, 255) if active_mode == AirOSMode.WHITEBOARD else (255, 100, 255)
-            cv2.putText(display_frame, f"AirOS Mode: {active_mode}  (Press 'M' to switch)", (20, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.65, mode_color, 2, cv2.LINE_AA)
-            cv2.putText(display_frame, f"Hand: {'DETECTED' if hand_detected else 'SEARCHING'} | Gesture: {gesture.value}", (20, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 200), 1, cv2.LINE_AA)
-            cv2.putText(display_frame, status_text, (20, 135), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
-
-            if launcher.is_open:
-                guide = "[LAUNCHER ACTIVE: Hover Item = Highlight | Pinch Thumb+Middle = Launch / Close | Victory 1s = Dismiss]"
-            elif active_mode == AirOSMode.MOUSE:
-                guide = "[MOUSE MODE: Index=Cursor | Thumb+Middle Pinch=Left Click/Drag | Hold Victory 1s = Open Launcher]"
-            elif active_mode == AirOSMode.WHITEBOARD:
-                guide = "[WHITEBOARD APP: Index=Draw | Palm=Erase | Fist=Hover | Hold Peace 2s Clear | Hold Victory 1s = Launcher]"
-            else:
-                guide = "[SYSTEM MODE: Open Palm=Spotify | Thumbs Up=Screenshot | Index=Log | Hold Victory 1s = Launcher]"
-
-            cv2.putText(display_frame, guide, (20, display_frame.shape[0] - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (220, 220, 220), 1, cv2.LINE_AA)
-
-            cv2.imshow(window_name, display_frame)
-
+    @Slot(object)
+    def on_debug_frame(frame: np.ndarray):
+        if debug_window_visible[0]:
+            cv2.imshow("AirOS Debug Camera View", frame)
             key = cv2.waitKey(1) & 0xFF
             if key == ord('q') or key == 27:
-                print("Shutting down AirOS...")
-                break
-            elif key == ord('m') or key == ord('M'):
-                if active_mode == AirOSMode.MOUSE:
-                    active_mode = AirOSMode.WHITEBOARD
-                elif active_mode == AirOSMode.WHITEBOARD:
-                    active_mode = AirOSMode.SYSTEM
-                else:
-                    active_mode = AirOSMode.MOUSE
-                mouse_handler.reset()
-                whiteboard_app.reset()
-                print(f"[AirOS] Mode: {active_mode}")
-            elif key == ord('c') or key == ord('C'):
-                if active_mode == AirOSMode.WHITEBOARD:
-                    whiteboard_app.clear()
-                    print("[AirOS Whiteboard] Canvas cleared.")
+                cv2.destroyWindow("AirOS Debug Camera View")
+                debug_window_visible[0] = False
+                worker.show_debug_window = False
 
-            if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
-                break
+    worker.frame_processed.connect(on_debug_frame)
 
-    finally:
-        mouse_handler.reset()
-        tracker.close()
-        camera.release()
+    @Slot()
+    def toggle_debug_window():
+        debug_window_visible[0] = not debug_window_visible[0]
+        worker.show_debug_window = debug_window_visible[0]
+        if not debug_window_visible[0]:
+            cv2.destroyAllWindows()
+        else:
+            print("[AirOS System Tray] Debug Camera View Enabled.")
+
+    tray_icon.toggle_launcher_requested.connect(overlay_window.toggle_launcher)
+    tray_icon.toggle_debug_camera_requested.connect(toggle_debug_window)
+
+    @Slot()
+    def on_quit():
+        print("Shutting down AirOS Runtime...")
+        worker.stop()
         cv2.destroyAllWindows()
+        app.quit()
+
+    tray_icon.quit_requested.connect(on_quit)
+
+    tray_icon.show()
+    worker.start()
+
+    sys.exit(app.exec())
 
 if __name__ == "__main__":
     main()
