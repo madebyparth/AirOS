@@ -61,8 +61,6 @@ class Canvas:
         if self.canvas.shape[0] != h or self.canvas.shape[1] != w:
             self.canvas = cv2.resize(self.canvas, (w, h))
             self.width, self.height = w, h
-
-        # Composite non-zero drawing pixels cleanly onto camera frame
         gray = cv2.cvtColor(self.canvas, cv2.COLOR_BGR2GRAY)
         mask = gray > 0
         composite_frame = frame.copy()
